@@ -1,7 +1,6 @@
-import {
-  Node24Runtime,
-  type Node24RuntimeHost,
-  type Node24RuntimeLaunchRequest,
+import type {
+  Node24RuntimeHost,
+  Node24RuntimeLaunchRequest,
 } from "@torkbot/code-mode/node";
 import type {
   ByteChannel,
@@ -18,171 +17,168 @@ import type {
 const maximumStderrLength = 64 * 1024;
 const terminationGracePeriodMilliseconds = 1_000;
 
-export interface SandboxNodeRuntimeOptions {
+export interface SandboxNodeRuntimeHostOptions {
   readonly sandbox: SandboxInstance;
   readonly nodePath: string;
   readonly cwd: string;
 }
 
 /**
- * Runs code-mode payloads with Node.js 24 inside a caller-owned Sandbox VM.
+ * Creates the Sandbox execution host required by Node24Runtime.
  *
  * The caller must keep the Sandbox instance open while the runtime is in use
- * and remains responsible for closing it. The runtime owns only the guest
- * processes it launches.
+ * and remains responsible for closing it. The host owns only the guest
+ * processes it launches through Node24Runtime.
  */
-export class SandboxNodeRuntime extends Node24Runtime {
-  constructor(options: SandboxNodeRuntimeOptions) {
-    super(new SandboxNodeRuntimeHost(options));
-  }
+export function createSandboxNodeRuntimeHost(
+  options: SandboxNodeRuntimeHostOptions,
+): Node24RuntimeHost {
+  return {
+    readNodeVersion: (signal) => readSandboxNodeVersion(options, signal),
+    launchNode: (req) => launchSandboxNode(options, req),
+  };
 }
 
-class SandboxNodeRuntimeHost implements Node24RuntimeHost {
-  readonly #sandbox: SandboxInstance;
-  readonly #nodePath: string;
-  readonly #cwd: string;
+async function readSandboxNodeVersion(
+  options: SandboxNodeRuntimeHostOptions,
+  signal: AbortSignal,
+): Promise<string> {
+  signal.throwIfAborted();
+  const result = await options.sandbox.exec(
+    options.nodePath,
+    ["--version"],
+    {
+      cwd: options.cwd,
+      signal,
+    },
+  );
+  signal.throwIfAborted();
 
-  constructor(options: SandboxNodeRuntimeOptions) {
-    this.#sandbox = options.sandbox;
-    this.#nodePath = options.nodePath;
-    this.#cwd = options.cwd;
+  if (result.exitCode !== 0) {
+    throw new Error(formatVersionFailure(result.exitCode, result.stderr));
+  }
+  return result.stdout.trim();
+}
+
+async function launchSandboxNode(
+  options: SandboxNodeRuntimeHostOptions,
+  req: Node24RuntimeLaunchRequest,
+): Promise<RuntimeInstance> {
+  req.signal.throwIfAborted();
+  const process = options.sandbox.spawn(
+    options.nodePath,
+    ["--input-type=module"],
+    {
+      cwd: options.cwd,
+      pipes: [req.channelFileDescriptor],
+    },
+  );
+  const pipe = process.pipes.get(req.channelFileDescriptor);
+  if (pipe === undefined) {
+    await stopPartialLaunch(process);
+    throw new Error(
+      `Sandbox Node.js runtime did not create fd ${req.channelFileDescriptor}`,
+    );
   }
 
-  async readNodeVersion(signal: AbortSignal): Promise<string> {
-    signal.throwIfAborted();
-    const result = await this.#sandbox.exec(
-      this.#nodePath,
-      ["--version"],
-      {
-        cwd: this.#cwd,
-        signal,
-      },
-    );
-    signal.throwIfAborted();
+  const stdout = drain(process.stdout);
+  const stderr = readTextTail(process.stderr);
+  let terminationRequested = false;
+  let finishedSettled = false;
+  let forceTerminationTimeout: ReturnType<typeof setTimeout> | undefined;
 
-    if (result.exitCode !== 0) {
-      throw new Error(formatVersionFailure(result.exitCode, result.stderr));
+  const requestTermination = (): void => {
+    if (finishedSettled || terminationRequested) {
+      return;
     }
-    return result.stdout.trim();
+    terminationRequested = true;
+    process.kill("SIGTERM");
+    forceTerminationTimeout ??= setTimeout(() => {
+      process.kill("SIGKILL");
+    }, terminationGracePeriodMilliseconds);
+    forceTerminationTimeout.unref();
+  };
+  const abort = (): void => requestTermination();
+
+  if (req.signal.aborted) {
+    abort();
+  } else {
+    req.signal.addEventListener("abort", abort, { once: true });
   }
 
-  async launchNode(req: Node24RuntimeLaunchRequest): Promise<RuntimeInstance> {
-    req.signal.throwIfAborted();
-    const process = this.#sandbox.spawn(
-      this.#nodePath,
-      ["--input-type=module"],
-      {
-        cwd: this.#cwd,
-        pipes: [req.channelFileDescriptor],
-      },
-    );
-    const pipe = process.pipes.get(req.channelFileDescriptor);
-    if (pipe === undefined) {
-      await stopPartialLaunch(process);
-      throw new Error(
-        `Sandbox Node.js runtime did not create fd ${req.channelFileDescriptor}`,
-      );
-    }
-
-    const stdout = drain(process.stdout);
-    const stderr = readTextTail(process.stderr);
-    let terminationRequested = false;
-    let finishedSettled = false;
-    let forceTerminationTimeout: ReturnType<typeof setTimeout> | undefined;
-
-    const requestTermination = (): void => {
-      if (finishedSettled || terminationRequested) {
-        return;
-      }
-      terminationRequested = true;
-      process.kill("SIGTERM");
-      forceTerminationTimeout ??= setTimeout(() => {
-        process.kill("SIGKILL");
-      }, terminationGracePeriodMilliseconds);
-      forceTerminationTimeout.unref();
-    };
-    const abort = (): void => requestTermination();
-
-    if (req.signal.aborted) {
-      abort();
-    } else {
-      req.signal.addEventListener("abort", abort, { once: true });
-    }
-
-    const finished: Promise<RuntimeFinished> = (async () => {
-      try {
-        const [launchError, exit, , stderrText] = await Promise.all([
-          process.ready.then(
-            () => null,
-            (error: unknown) => errorFromUnknown(error),
-          ),
-          process.exit,
-          stdout,
-          stderr,
-        ]);
-
-        if (terminationRequested) {
-          return { kind: "closed" };
-        }
-        if (launchError !== null) {
-          return { kind: "failed", error: launchError };
-        }
-        if (exit.exitCode === 0 && exit.signal === null) {
-          return { kind: "closed" };
-        }
-        return {
-          kind: "failed",
-          error: new Error(formatProcessFailure(exit, stderrText)),
-        };
-      } catch (error) {
-        return {
-          kind: "failed",
-          error: errorFromUnknown(error),
-        };
-      } finally {
-        finishedSettled = true;
-        req.signal.removeEventListener("abort", abort);
-        if (forceTerminationTimeout !== undefined) {
-          clearTimeout(forceTerminationTimeout);
-        }
-      }
-    })();
-
+  const finished: Promise<RuntimeFinished> = (async () => {
     try {
-      await process.ready;
-      await writeAndClose(
-        process.stdin,
-        new TextEncoder().encode(req.bootstrapSource),
-      );
-    } catch (error) {
-      requestTermination();
-      await finished;
-      if (req.signal.aborted) {
-        throw req.signal.reason;
-      }
-      throw error;
-    }
+      const [launchError, exit, , stderrText] = await Promise.all([
+        process.ready.then(
+          () => null,
+          (error: unknown) => errorFromUnknown(error),
+        ),
+        process.exit,
+        stdout,
+        stderr,
+      ]);
 
+      if (terminationRequested) {
+        return { kind: "closed" };
+      }
+      if (launchError !== null) {
+        return { kind: "failed", error: launchError };
+      }
+      if (exit.exitCode === 0 && exit.signal === null) {
+        return { kind: "closed" };
+      }
+      return {
+        kind: "failed",
+        error: new Error(formatProcessFailure(exit, stderrText)),
+      };
+    } catch (error) {
+      return {
+        kind: "failed",
+        error: errorFromUnknown(error),
+      };
+    } finally {
+      finishedSettled = true;
+      req.signal.removeEventListener("abort", abort);
+      if (forceTerminationTimeout !== undefined) {
+        clearTimeout(forceTerminationTimeout);
+      }
+    }
+  })();
+
+  try {
+    await process.ready;
+    await writeAndClose(
+      process.stdin,
+      new TextEncoder().encode(req.bootstrapSource),
+    );
+  } catch (error) {
+    requestTermination();
+    await finished;
     if (req.signal.aborted) {
-      requestTermination();
-      await finished;
       throw req.signal.reason;
     }
-
-    const channel: ByteChannel = {
-      incoming: readableChunks(pipe.output),
-      outgoing: new WebByteWriter(pipe.input),
-    };
-
-    return {
-      channel,
-      finished,
-      async terminate(_reason: string): Promise<void> {
-        requestTermination();
-        await finished;
-      },
-    };
+    throw error;
   }
+
+  if (req.signal.aborted) {
+    requestTermination();
+    await finished;
+    throw req.signal.reason;
+  }
+
+  const channel: ByteChannel = {
+    incoming: readableChunks(pipe.output),
+    outgoing: new WebByteWriter(pipe.input),
+  };
+
+  return {
+    channel,
+    finished,
+    async terminate(_reason: string): Promise<void> {
+      requestTermination();
+      await finished;
+    },
+  };
 }
 
 class WebByteWriter implements ByteWriter {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { Node24Runtime } from "@torkbot/code-mode/node";
 import type {
   SandboxExecOptions,
   SandboxExecResult,
@@ -11,18 +12,14 @@ import type {
   SandboxSpawnOptions,
 } from "@torkbot/sandbox";
 
-import { SandboxNodeRuntime } from "./index.ts";
+import { createSandboxNodeRuntimeHost } from "./index.ts";
 
-test("SandboxNodeRuntime launches the code-mode bootstrap over Sandbox process pipes", async () => {
+test("Sandbox Node runtime host launches the code-mode bootstrap over Sandbox process pipes", async () => {
   const process = createSandboxProcess({
     channelOutput: [new TextEncoder().encode("runtime output")],
   });
   const sandbox = createRuntimeSandbox(process.instance);
-  const runtime = new SandboxNodeRuntime({
-    sandbox: sandbox.instance,
-    nodePath: "/usr/bin/node",
-    cwd: "/workspace",
-  });
+  const runtime = createRuntime(sandbox.instance);
   const signal = AbortSignal.timeout(5_000);
 
   const instance = await runtime.start({
@@ -81,17 +78,13 @@ test("SandboxNodeRuntime launches the code-mode bootstrap over Sandbox process p
   assert.equal(sandbox.closeCalls(), 0);
 });
 
-test("SandboxNodeRuntime rejects launch when Sandbox omits the requested pipe", async () => {
+test("Sandbox Node runtime host rejects launch when Sandbox omits the requested pipe", async () => {
   const process = createSandboxProcess({
     includeChannel: false,
     readyError: new Error("guest launch failed without fd 3"),
   });
   const sandbox = createRuntimeSandbox(process.instance);
-  const runtime = new SandboxNodeRuntime({
-    sandbox: sandbox.instance,
-    nodePath: "/usr/bin/node",
-    cwd: "/workspace",
-  });
+  const runtime = createRuntime(sandbox.instance);
 
   await assert.rejects(runtime.start({
     payload: {
@@ -103,18 +96,14 @@ test("SandboxNodeRuntime rejects launch when Sandbox omits the requested pipe", 
   assert.deepEqual(process.kills(), ["SIGTERM"]);
 });
 
-test("SandboxNodeRuntime rejects a non-Node-24 guest before spawning", async () => {
+test("Sandbox Node runtime host rejects a non-Node-24 guest before spawning", async () => {
   const process = createSandboxProcess();
   const sandbox = createRuntimeSandbox(process.instance, {
     exitCode: 0,
     stdout: "v23.11.0\n",
     stderr: "",
   });
-  const runtime = new SandboxNodeRuntime({
-    sandbox: sandbox.instance,
-    nodePath: "/usr/bin/node",
-    cwd: "/workspace",
-  });
+  const runtime = createRuntime(sandbox.instance);
 
   await assert.rejects(runtime.start({
     payload: {
@@ -126,16 +115,12 @@ test("SandboxNodeRuntime rejects a non-Node-24 guest before spawning", async () 
   assert.deepEqual(sandbox.spawnCalls(), []);
 });
 
-test("SandboxNodeRuntime cleans up and rejects Sandbox launch failures", async () => {
+test("Sandbox Node runtime host cleans up and rejects Sandbox launch failures", async () => {
   const process = createSandboxProcess({
     readyError: new Error("guest launch failed"),
   });
   const sandbox = createRuntimeSandbox(process.instance);
-  const runtime = new SandboxNodeRuntime({
-    sandbox: sandbox.instance,
-    nodePath: "/usr/bin/node",
-    cwd: "/workspace",
-  });
+  const runtime = createRuntime(sandbox.instance);
 
   await assert.rejects(runtime.start({
     payload: {
@@ -147,14 +132,10 @@ test("SandboxNodeRuntime cleans up and rejects Sandbox launch failures", async (
   assert.deepEqual(process.kills(), ["SIGTERM"]);
 });
 
-test("SandboxNodeRuntime reports unexpected guest process failures with stderr", async () => {
+test("Sandbox Node runtime host reports unexpected guest process failures with stderr", async () => {
   const process = createSandboxProcess({ stderr: "guest exploded" });
   const sandbox = createRuntimeSandbox(process.instance);
-  const runtime = new SandboxNodeRuntime({
-    sandbox: sandbox.instance,
-    nodePath: "/usr/bin/node",
-    cwd: "/workspace",
-  });
+  const runtime = createRuntime(sandbox.instance);
   const instance = await runtime.start({
     payload: {
       kind: "javascript-module",
@@ -172,14 +153,10 @@ test("SandboxNodeRuntime reports unexpected guest process failures with stderr",
   }
 });
 
-test("SandboxNodeRuntime aborts a launched process and resolves it as closed", async () => {
+test("Sandbox Node runtime host aborts a launched process and resolves it as closed", async () => {
   const process = createSandboxProcess();
   const sandbox = createRuntimeSandbox(process.instance);
-  const runtime = new SandboxNodeRuntime({
-    sandbox: sandbox.instance,
-    nodePath: "/usr/bin/node",
-    cwd: "/workspace",
-  });
+  const runtime = createRuntime(sandbox.instance);
   const controller = new AbortController();
   const instance = await runtime.start({
     payload: {
@@ -194,6 +171,14 @@ test("SandboxNodeRuntime aborts a launched process and resolves it as closed", a
   assert.deepEqual(await instance.finished, { kind: "closed" });
   assert.deepEqual(process.kills(), ["SIGTERM"]);
 });
+
+function createRuntime(sandbox: SandboxInstance): Node24Runtime {
+  return new Node24Runtime(createSandboxNodeRuntimeHost({
+    sandbox,
+    nodePath: "/usr/bin/node",
+    cwd: "/workspace",
+  }));
+}
 
 type ObservedExec = {
   readonly command: string;
