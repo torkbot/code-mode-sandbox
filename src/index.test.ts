@@ -121,7 +121,10 @@ test("SandboxNodeRuntime launches the code-mode bootstrap over Sandbox process p
 });
 
 test("SandboxNodeRuntime rejects launch when Sandbox omits the requested pipe", async () => {
-  const process = createSandboxProcess({ includeChannel: false });
+  const process = createSandboxProcess({
+    includeChannel: false,
+    readyError: new Error("guest launch failed without fd 3"),
+  });
   const sandbox = createRuntimeSandbox(process.instance);
   const runtime = new SandboxNodeRuntime({
     sandbox: sandbox.instance,

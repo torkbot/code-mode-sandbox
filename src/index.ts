@@ -272,6 +272,7 @@ async function stopPartialLaunch(process: SandboxProcess): Promise<void> {
   forceTerminationTimeout.unref();
   try {
     await Promise.allSettled([
+      process.ready,
       process.exit,
       drain(process.stdout),
       drain(process.stderr),
