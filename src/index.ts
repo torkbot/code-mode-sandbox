@@ -10,8 +10,6 @@ import type {
   RuntimeInstance,
 } from "@torkbot/code-mode/runtime";
 import type {
-  SandboxBootOptions,
-  SandboxDefinition,
   SandboxInstance,
   SandboxProcess,
   SandboxProcessExit,
@@ -26,64 +24,16 @@ export interface SandboxNodeRuntimeOptions {
   readonly cwd: string;
 }
 
-/** Runs code-mode payloads with Node.js 24 inside an existing Sandbox VM. */
+/**
+ * Runs code-mode payloads with Node.js 24 inside a caller-owned Sandbox VM.
+ *
+ * The caller must keep the Sandbox instance open while the runtime is in use
+ * and remains responsible for closing it. The runtime owns only the guest
+ * processes it launches.
+ */
 export class SandboxNodeRuntime extends Node24Runtime {
   constructor(options: SandboxNodeRuntimeOptions) {
     super(new SandboxNodeRuntimeHost(options));
-  }
-}
-
-export type SandboxCodeModeBootOptions = Omit<SandboxBootOptions, "cwd"> & {
-  readonly cwd: string;
-};
-
-export interface OpenSandboxCodeModeOptions {
-  readonly definition: SandboxDefinition;
-  readonly boot: SandboxCodeModeBootOptions;
-  readonly nodePath: string;
-}
-
-export interface SandboxCodeModeSession extends AsyncDisposable {
-  readonly sandbox: SandboxInstance;
-  readonly runtime: SandboxNodeRuntime;
-  close(): Promise<void>;
-}
-
-/**
- * Boots one Sandbox VM and pairs its lifecycle with a code-mode Node runtime.
- * The supplied definition remains the authority for persistence, resources,
- * mounts, and network access.
- */
-export async function openSandboxCodeMode(
-  options: OpenSandboxCodeModeOptions,
-): Promise<SandboxCodeModeSession> {
-  const sandbox = await options.definition.boot(options.boot);
-  const runtime = new SandboxNodeRuntime({
-    sandbox,
-    nodePath: options.nodePath,
-    cwd: options.boot.cwd,
-  });
-
-  return new OpenSandboxCodeModeSession(sandbox, runtime);
-}
-
-class OpenSandboxCodeModeSession implements SandboxCodeModeSession {
-  readonly sandbox: SandboxInstance;
-  readonly runtime: SandboxNodeRuntime;
-  #closing: Promise<void> | undefined;
-
-  constructor(sandbox: SandboxInstance, runtime: SandboxNodeRuntime) {
-    this.sandbox = sandbox;
-    this.runtime = runtime;
-  }
-
-  close(): Promise<void> {
-    this.#closing ??= this.sandbox.close();
-    return this.#closing;
-  }
-
-  async [Symbol.asyncDispose](): Promise<void> {
-    await this.close();
   }
 }
 

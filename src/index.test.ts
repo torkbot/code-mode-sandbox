@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type {
-  SandboxBootOptions,
-  SandboxDefinition,
   SandboxExecOptions,
   SandboxExecResult,
   SandboxInstance,
@@ -13,45 +11,7 @@ import type {
   SandboxSpawnOptions,
 } from "@torkbot/sandbox";
 
-import {
-  openSandboxCodeMode,
-  SandboxNodeRuntime,
-} from "./index.ts";
-
-test("openSandboxCodeMode boots the supplied definition and owns its lifecycle", async () => {
-  const sandbox = createLifecycleSandbox();
-  let observedBoot: SandboxBootOptions | undefined;
-  const definition: SandboxDefinition = {
-    environmentFacts: () => [],
-    async boot(options) {
-      observedBoot = options;
-      return sandbox.instance;
-    },
-  };
-
-  const session = await openSandboxCodeMode({
-    definition,
-    boot: {
-      cwd: "/workspace",
-      hostname: "code-mode-test",
-    },
-    nodePath: "/usr/bin/node",
-  });
-
-  assert.deepEqual(observedBoot, {
-    cwd: "/workspace",
-    hostname: "code-mode-test",
-  });
-  assert.equal(session.sandbox, sandbox.instance);
-  assert.ok(session.runtime instanceof SandboxNodeRuntime);
-
-  await Promise.all([
-    session.close(),
-    session.close(),
-    session[Symbol.asyncDispose](),
-  ]);
-  assert.equal(sandbox.closeCalls(), 1);
-});
+import { SandboxNodeRuntime } from "./index.ts";
 
 test("SandboxNodeRuntime launches the code-mode bootstrap over Sandbox process pipes", async () => {
   const process = createSandboxProcess({
@@ -118,6 +78,7 @@ test("SandboxNodeRuntime launches the code-mode bootstrap over Sandbox process p
   ]);
   assert.deepEqual(process.kills(), ["SIGTERM"]);
   assert.deepEqual(await instance.finished, { kind: "closed" });
+  assert.equal(sandbox.closeCalls(), 0);
 });
 
 test("SandboxNodeRuntime rejects launch when Sandbox omits the requested pipe", async () => {
@@ -257,11 +218,16 @@ function createRuntimeSandbox(
   readonly instance: SandboxInstance;
   execCalls(): readonly ObservedExec[];
   spawnCalls(): readonly ObservedSpawn[];
+  closeCalls(): number;
 } {
   const execCalls: ObservedExec[] = [];
   const spawnCalls: ObservedSpawn[] = [];
+  let closeCalls = 0;
   const unsupported = (): never => {
     throw new Error("not used by this runtime host test");
+  };
+  const close = async (): Promise<void> => {
+    closeCalls += 1;
   };
 
   return {
@@ -287,44 +253,11 @@ function createRuntimeSandbox(
         return process;
       },
       pty: unsupported,
-      async close() {},
-      async [Symbol.asyncDispose]() {},
-    },
-    execCalls: () => execCalls,
-    spawnCalls: () => spawnCalls,
-  };
-}
-
-function createLifecycleSandbox(): {
-  readonly instance: SandboxInstance;
-  closeCalls(): number;
-} {
-  let closeCalls = 0;
-  const unsupported = (): never => {
-    throw new Error("not used by this lifecycle test");
-  };
-  const close = async (): Promise<void> => {
-    closeCalls += 1;
-  };
-
-  return {
-    instance: {
-      fs: {
-        stat: unsupported,
-        readDir: unsupported,
-        readFile: unsupported,
-        writeFile: unsupported,
-        mkdir: unsupported,
-        remove: unsupported,
-        rename: unsupported,
-      },
-      environmentFacts: unsupported,
-      exec: unsupported,
-      spawn: unsupported,
-      pty: unsupported,
       close,
       [Symbol.asyncDispose]: close,
     },
+    execCalls: () => execCalls,
+    spawnCalls: () => spawnCalls,
     closeCalls: () => closeCalls,
   };
 }
