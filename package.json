@@ -1,0 +1,39 @@
+{
+  "name": "@torkbot/code-mode-sandbox",
+  "version": "0.0.0-dev",
+  "private": false,
+  "type": "module",
+  "description": "Sandbox-backed runtime integration for @torkbot/code-mode.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/torkbot/code-mode-sandbox"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc --project tsconfig.build.json --pretty",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit --pretty",
+    "prepublishOnly": "node --run build"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.0",
+    "typescript": "^7.0.2"
+  }
+}
+

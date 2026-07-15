@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish:
+    name: Publish immutable package to npm
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout release target
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify release target and version
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          target_sha="$(git rev-parse HEAD)"
+          git fetch origin main
+          git merge-base --is-ancestor "$target_sha" origin/main
+          package_version="$(node -p 'require("./package.json").version')"
+          if [ "$RELEASE_TAG" != "v${package_version}" ]; then
+            printf 'release tag %s does not match package version %s\n' "$RELEASE_TAG" "$package_version" >&2
+            exit 1
+          fi
+          printf 'target-sha=%s\n' "$target_sha" >> "$GITHUB_OUTPUT"
+          printf 'package-version=%s\n' "$package_version" >> "$GITHUB_OUTPUT"
+
+      - name: Download package artifact from main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ./scripts/download-release-artifact.ts --target-sha "${{ steps.release.outputs.target-sha }}"
+
+      - name: Verify package artifact
+        run: |
+          node ./scripts/release-artifact-manifest.ts verify \
+            --head-sha "${{ steps.release.outputs.target-sha }}" \
+            --package-name "$(node -p 'require("./package.json").name')" \
+            --package-version "${{ steps.release.outputs.package-version }}" \
+            --manifest dist/release-artifact/build-manifest.json
+
+      - name: Publish package
+        run: npm publish dist/release-artifact/*.tgz --provenance --access public
