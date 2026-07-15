@@ -22,7 +22,59 @@ required to use those capabilities together.
 ## Install
 
 ```sh
-npm install @torkbot/code-mode-sandbox
+npm install @torkbot/code-mode @torkbot/code-mode-sandbox @torkbot/sandbox
+```
+
+## Usage
+
+Define the machine with Sandbox, then open a code-mode session for it:
+
+```ts
+import { createClient } from "@torkbot/code-mode";
+import {
+  openSandboxCodeMode,
+} from "@torkbot/code-mode-sandbox";
+import { defineSandbox } from "@torkbot/sandbox";
+
+const definition = defineSandbox({
+  rootfs: machineRootfs,
+  resources: {
+    cpus: 2,
+    memoryMiB: 2048,
+  },
+});
+
+await using session = await openSandboxCodeMode({
+  definition,
+  boot: {
+    cwd: "/workspace",
+  },
+  nodePath: "/usr/bin/node",
+});
+
+const client = createClient({
+  toolbox,
+  runtime: session.runtime,
+});
+```
+
+The absolute guest working directory and Node.js path are required because they
+determine module resolution and the executable used for both validation and
+execution. Reusing a persistent root filesystem remains a property of the
+supplied Sandbox definition; this package does not infer machine identity or
+persistence policy.
+
+Callers that already own a booted `SandboxInstance` can construct a runtime
+without transferring the VM lifecycle:
+
+```ts
+import { SandboxNodeRuntime } from "@torkbot/code-mode-sandbox";
+
+const runtime = new SandboxNodeRuntime({
+  sandbox,
+  cwd: "/workspace",
+  nodePath: "/usr/bin/node",
+});
 ```
 
 ## Development
