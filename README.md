@@ -1,8 +1,29 @@
 # @torkbot/code-mode-sandbox
 
-Sandbox-backed runtime integration for [`@torkbot/code-mode`](https://github.com/torkbot/code-mode), built on [`@torkbot/sandbox`](https://github.com/torkbot/sandbox).
+Run [`@torkbot/code-mode`](https://github.com/torkbot/code-mode) programs
+inside lifecycle-managed
+[`@torkbot/sandbox`](https://github.com/torkbot/sandbox) microVMs.
 
-This repository currently contains project boilerplate only. The public API and implementation will be added separately.
+This package owns the integration between code mode's runtime contract and
+Sandbox VM execution. It boots a caller-defined Sandbox machine, provides a
+code-mode runtime backed by Node.js inside that machine, and couples the runtime
+and VM lifecycles so they are closed together.
+
+The caller remains responsible for the Sandbox definition, including its image,
+persistence, mounts, resources, and network access. The embedding application
+remains responsible for machine identity, session reuse, and the runtime facts
+presented to an agent.
+
+`@torkbot/code-mode` remains responsible for tool declarations, source
+validation, protocol routing, and telemetry. `@torkbot/sandbox` remains
+responsible for isolated VM execution. This package adds only the integration
+required to use those capabilities together.
+
+## Install
+
+```sh
+npm install @torkbot/code-mode-sandbox
+```
 
 ## Development
 
