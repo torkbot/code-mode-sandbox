@@ -19,7 +19,8 @@ machines.
 `@torkbot/code-mode` remains responsible for tool declarations, source
 validation, protocol routing, and telemetry. `@torkbot/sandbox` remains
 responsible for isolated VM execution. This package adds only the integration
-required to use those capabilities together.
+required to use those capabilities together. The runtime channel is the
+Sandbox process pipe's standard readable and writable Web Streams pair.
 
 ## Install
 

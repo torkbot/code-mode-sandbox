@@ -3,8 +3,6 @@ import type {
   Node24RuntimeLaunchRequest,
 } from "@torkbot/code-mode/node";
 import type {
-  ByteChannel,
-  ByteWriter,
   RuntimeFinished,
   RuntimeInstance,
 } from "@torkbot/code-mode/runtime";
@@ -166,9 +164,9 @@ async function launchSandboxNode(
     throw req.signal.reason;
   }
 
-  const channel: ByteChannel = {
-    incoming: readableChunks(pipe.output),
-    outgoing: new WebByteWriter(pipe.input),
+  const channel: RuntimeInstance["channel"] = {
+    readable: pipe.output,
+    writable: pipe.input,
   };
 
   return {
@@ -179,35 +177,6 @@ async function launchSandboxNode(
       await finished;
     },
   };
-}
-
-class WebByteWriter implements ByteWriter {
-  readonly #writer: WritableStreamDefaultWriter<Uint8Array>;
-  #closing: Promise<void> | undefined;
-
-  constructor(stream: WritableStream<Uint8Array>) {
-    this.#writer = stream.getWriter();
-  }
-
-  async write(chunk: Uint8Array): Promise<void> {
-    if (this.#closing !== undefined) {
-      throw new Error("Sandbox Node.js runtime byte channel is closed");
-    }
-    await this.#writer.write(chunk);
-  }
-
-  close(): Promise<void> {
-    this.#closing ??= this.#close();
-    return this.#closing;
-  }
-
-  async #close(): Promise<void> {
-    try {
-      await this.#writer.close();
-    } finally {
-      this.#writer.releaseLock();
-    }
-  }
 }
 
 async function stopPartialLaunch(process: SandboxProcess): Promise<void> {
@@ -241,25 +210,8 @@ async function writeAndClose(
   }
 }
 
-async function* readableChunks(
-  stream: ReadableStream<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const result = await reader.read();
-      if (result.done) {
-        return;
-      }
-      yield result.value;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
 async function drain(stream: ReadableStream<Uint8Array>): Promise<void> {
-  for await (const _chunk of readableChunks(stream)) {
+  for await (const _chunk of stream) {
     // Drain output so an unconsumed stream cannot block process completion.
   }
 }
@@ -269,7 +221,7 @@ async function readTextTail(
 ): Promise<string> {
   const decoder = new TextDecoder();
   let text = "";
-  for await (const chunk of readableChunks(stream)) {
+  for await (const chunk of stream) {
     text = appendTextTail(text, decoder.decode(chunk, { stream: true }));
   }
   return appendTextTail(text, decoder.decode());

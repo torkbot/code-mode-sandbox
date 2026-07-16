@@ -51,18 +51,22 @@ test("Sandbox Node runtime host launches the code-mode bootstrap over Sandbox pr
     new TextDecoder().decode(joinBytes(process.stdinWrites())),
     /payload sentinel/,
   );
+  assert.equal(instance.channel.readable, process.channelOutputStream);
+  assert.equal(instance.channel.writable, process.channelInputStream);
   assert.deepEqual(
-    (await collect(instance.channel.incoming)).map((chunk) => (
+    (await collect(instance.channel.readable)).map((chunk) => (
       new TextDecoder().decode(chunk)
     )),
     ["runtime output"],
   );
 
-  await instance.channel.outgoing.write(new TextEncoder().encode("host input"));
-  await Promise.all([
-    instance.channel.outgoing.close(),
-    instance.channel.outgoing.close(),
-  ]);
+  const writer = instance.channel.writable.getWriter();
+  try {
+    await writer.write(new TextEncoder().encode("host input"));
+    await writer.close();
+  } finally {
+    writer.releaseLock();
+  }
   assert.equal(process.channelInputClosed(), true);
   assert.equal(
     new TextDecoder().decode(joinBytes(process.channelInputWrites())),
@@ -254,6 +258,8 @@ function createSandboxProcess(options: {
   readonly stderr?: string;
 } = {}): {
   readonly instance: SandboxProcess;
+  readonly channelInputStream: WritableStream<Uint8Array>;
+  readonly channelOutputStream: ReadableStream<Uint8Array>;
   channelInputClosed(): boolean;
   channelInputWrites(): readonly Uint8Array[];
   stdinClosed(): boolean;
@@ -263,6 +269,7 @@ function createSandboxProcess(options: {
 } {
   const stdin = createWritableRecorder();
   const channelInput = createWritableRecorder();
+  const channelOutput = readableFrom(options.channelOutput ?? []);
   const exit = deferred<SandboxProcessExit>();
   const kills: SandboxSignal[] = [];
   const includeChannel = options.includeChannel ?? true;
@@ -277,7 +284,7 @@ function createSandboxProcess(options: {
       pipes: includeChannel
         ? new Map([[3, {
             input: channelInput.stream,
-            output: readableFrom(options.channelOutput ?? []),
+            output: channelOutput,
           }]])
         : new Map(),
       ready: options.readyError === undefined
@@ -289,6 +296,8 @@ function createSandboxProcess(options: {
         exit.resolve({ exitCode: null, signal });
       },
     },
+    channelInputStream: channelInput.stream,
+    channelOutputStream: channelOutput,
     channelInputClosed: channelInput.closed,
     channelInputWrites: channelInput.writes,
     stdinClosed: stdin.closed,
