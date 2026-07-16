@@ -176,6 +176,23 @@ test("Sandbox Node runtime host aborts a launched process and resolves it as clo
   assert.deepEqual(process.kills(), ["SIGTERM"]);
 });
 
+test("Sandbox Node runtime host requires absolute guest paths", () => {
+  const sandbox = createRuntimeSandbox(createSandboxProcess().instance);
+
+  assert.throws(() => createSandboxNodeRuntimeHost({
+    sandbox: sandbox.instance,
+    nodePath: "/usr/bin/node",
+    cwd: "workspace",
+  }), /cwd must be an absolute guest path/);
+  assert.throws(() => createSandboxNodeRuntimeHost({
+    sandbox: sandbox.instance,
+    nodePath: "node",
+    cwd: "/workspace",
+  }), /nodePath must be an absolute guest path/);
+  assert.deepEqual(sandbox.execCalls(), []);
+  assert.deepEqual(sandbox.spawnCalls(), []);
+});
+
 function createRuntime(sandbox: SandboxInstance): Node24Runtime {
   return new Node24Runtime(createSandboxNodeRuntimeHost({
     sandbox,

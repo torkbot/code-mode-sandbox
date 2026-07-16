@@ -31,10 +31,19 @@ export interface SandboxNodeRuntimeHostOptions {
 export function createSandboxNodeRuntimeHost(
   options: SandboxNodeRuntimeHostOptions,
 ): Node24RuntimeHost {
+  requireAbsoluteGuestPath("cwd", options.cwd);
+  requireAbsoluteGuestPath("nodePath", options.nodePath);
+
   return {
     readNodeVersion: (signal) => readSandboxNodeVersion(options, signal),
     launchNode: (req) => launchSandboxNode(options, req),
   };
+}
+
+function requireAbsoluteGuestPath(name: string, value: string): void {
+  if (!value.startsWith("/")) {
+    throw new TypeError(`${name} must be an absolute guest path`);
+  }
 }
 
 async function readSandboxNodeVersion(
