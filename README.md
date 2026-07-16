@@ -81,4 +81,8 @@ npm run build
 
 ## Releases
 
-Every successful push to `main` produces an immutable npm tarball tied to that commit. Publishing a GitHub release tagged `v<package version>` verifies and publishes that exact CI artifact to npm without rebuilding it.
+Every successful push to `main` produces an immutable package payload tied to
+that commit. Publishing a GitHub release tagged `v<package version>` verifies
+that exact CI artifact, derives the published `package.json` version from the
+tag, and repacks the payload without rebuilding its code before publishing it
+to npm.

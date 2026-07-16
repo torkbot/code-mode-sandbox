@@ -51,7 +51,7 @@ jobs:
         run: npm pack --dry-run
 
   release-package:
-    name: Build immutable release package
+    name: Build immutable package payload
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-24.04
@@ -72,7 +72,7 @@ jobs:
       - name: Build package
         run: npm run build
 
-      - name: Pack release artifact
+      - name: Pack immutable package payload
         run: |
           set -euo pipefail
           mkdir -p dist/release
@@ -81,7 +81,6 @@ jobs:
           node ./scripts/release-artifact-manifest.ts write \
             --head-sha "${{ github.sha }}" \
             --package-name "$(node -p 'require("./package.json").name')" \
-            --package-version "$(node -p 'require("./package.json").version')" \
             --tarball "$tarball" \
             --output dist/release/build-manifest.json
 
