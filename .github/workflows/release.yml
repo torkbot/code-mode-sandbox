@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish immutable package to npm
+    name: Publish derived package to npm
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -31,7 +31,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Verify release target and version
+      - name: Verify release target and tag
         id: release
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -40,9 +40,9 @@ jobs:
           target_sha="$(git rev-parse HEAD)"
           git fetch origin main
           git merge-base --is-ancestor "$target_sha" origin/main
-          package_version="$(node -p 'require("./package.json").version')"
-          if [ "$RELEASE_TAG" != "v${package_version}" ]; then
-            printf 'release tag %s does not match package version %s\n' "$RELEASE_TAG" "$package_version" >&2
+          package_version="${RELEASE_TAG#v}"
+          if [ "$package_version" = "$RELEASE_TAG" ]; then
+            printf 'release tag must start with v: %s\n' "$RELEASE_TAG" >&2
             exit 1
           fi
           printf 'target-sha=%s\n' "$target_sha" >> "$GITHUB_OUTPUT"
@@ -58,8 +58,33 @@ jobs:
           node ./scripts/release-artifact-manifest.ts verify \
             --head-sha "${{ steps.release.outputs.target-sha }}" \
             --package-name "$(node -p 'require("./package.json").name')" \
-            --package-version "${{ steps.release.outputs.package-version }}" \
             --manifest dist/release-artifact/build-manifest.json
 
+      - name: Derive release package
+        env:
+          PACKAGE_VERSION: ${{ steps.release.outputs.package-version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tarballs=(dist/release-artifact/*.tgz)
+          if [ "${#tarballs[@]}" -ne 1 ]; then
+            printf 'release artifact must contain exactly one tarball, found %s\n' "${#tarballs[@]}" >&2
+            exit 1
+          fi
+          mkdir -p dist/release-staging dist/release
+          tar -xzf "${tarballs[0]}" --directory dist/release-staging
+          expected_name="$(node -p 'require("./package.json").name')"
+          actual_name="$(node -p 'require("./dist/release-staging/package/package.json").name')"
+          test "$actual_name" = "$expected_name"
+          npm version "$PACKAGE_VERSION" \
+            --no-git-tag-version \
+            --ignore-scripts \
+            --prefix dist/release-staging/package
+          actual_version="$(node -p 'require("./dist/release-staging/package/package.json").version')"
+          test "$actual_version" = "$PACKAGE_VERSION"
+          npm pack dist/release-staging/package \
+            --ignore-scripts \
+            --pack-destination dist/release
+
       - name: Publish package
-        run: npm publish dist/release-artifact/*.tgz --provenance --access public
+        run: npm publish dist/release/*.tgz --ignore-scripts --provenance --access public

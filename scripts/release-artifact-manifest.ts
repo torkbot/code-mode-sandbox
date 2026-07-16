@@ -3,10 +3,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 
 type ReleaseArtifactManifest = {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly headSha: string;
   readonly packageName: string;
-  readonly packageVersion: string;
   readonly tarball: {
     readonly file: string;
     readonly sha256: string;
@@ -20,10 +19,9 @@ const command = args[0];
 if (command === "write") {
   const tarball = resolve(repoRoot, requiredArg("--tarball"));
   const manifest: ReleaseArtifactManifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     headSha: requiredArg("--head-sha"),
     packageName: requiredArg("--package-name"),
-    packageVersion: requiredArg("--package-version"),
     tarball: {
       file: basename(tarball),
       sha256: await sha256File(tarball),
@@ -33,10 +31,9 @@ if (command === "write") {
 } else if (command === "verify") {
   const manifestPath = resolve(repoRoot, requiredArg("--manifest"));
   const manifest = parseManifest(JSON.parse(await readFile(manifestPath, "utf8")));
-  assertEqual("schema version", manifest.schemaVersion, 1);
+  assertEqual("schema version", manifest.schemaVersion, 2);
   assertEqual("head SHA", manifest.headSha, requiredArg("--head-sha"));
   assertEqual("package name", manifest.packageName, requiredArg("--package-name"));
-  assertEqual("package version", manifest.packageVersion, requiredArg("--package-version"));
   assertEqual(
     "tarball digest",
     await sha256File(resolve(dirname(manifestPath), manifest.tarball.file)),
@@ -68,10 +65,9 @@ async function sha256File(path: string): Promise<string> {
 function parseManifest(value: unknown): ReleaseArtifactManifest {
   if (
     typeof value !== "object" || value === null ||
-    !("schemaVersion" in value) || value.schemaVersion !== 1 ||
+    !("schemaVersion" in value) || value.schemaVersion !== 2 ||
     !("headSha" in value) || typeof value.headSha !== "string" ||
     !("packageName" in value) || typeof value.packageName !== "string" ||
-    !("packageVersion" in value) || typeof value.packageVersion !== "string" ||
     !("tarball" in value) || typeof value.tarball !== "object" || value.tarball === null ||
     !("file" in value.tarball) || typeof value.tarball.file !== "string" ||
     basename(value.tarball.file) !== value.tarball.file ||
