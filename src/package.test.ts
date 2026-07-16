@@ -19,7 +19,8 @@ test("package publishes the Sandbox integration against released contracts", asy
   assert.deepEqual(Object.keys(packageJson.exports), ["."]);
   assert.deepEqual(packageJson.files, ["dist"]);
   assert.match(source, /from "@torkbot\/code-mode\/node"/);
-  assert.match(source, /export function createSandboxNodeRuntimeHost/);
+  assert.match(source, /export function createSandboxNodeRuntime/);
+  assert.doesNotMatch(source, /export function createSandboxNodeRuntimeHost/);
   assert.doesNotMatch(source, /extends Node24Runtime/);
   assert.doesNotMatch(source, /WebByteWriter|readableChunks/);
   assert.doesNotMatch(source, /@torkbot\/code-mode\/sandbox-node/);

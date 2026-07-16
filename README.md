@@ -5,16 +5,14 @@ with Node.js 24 inside
 [`@torkbot/sandbox`](https://github.com/torkbot/sandbox) microVMs.
 
 This package owns the integration between code mode's runtime contract and
-Sandbox VM execution. It adapts a caller-owned, booted `SandboxInstance` into
-the execution host required by `Node24Runtime`; composing those values produces
-a code-mode runtime backed by Node.js inside that machine.
+Sandbox VM execution. It creates a Node.js 24 code-mode runtime backed by a
+caller-owned, booted `SandboxInstance`.
 
 The caller owns the Sandbox lifecycle. It chooses the image, persistence,
 mounts, resources, network access, machine identity, and reuse policy; boots the
 machine; keeps it open while the runtime is in use; and closes it afterward.
-The Sandbox runtime host owns only the guest processes it launches through
-`Node24Runtime`. This package does not boot, pool, reuse, or close Sandbox
-machines.
+The Sandbox runtime owns only the guest processes it launches. This package
+does not boot, pool, reuse, or close Sandbox machines.
 
 `@torkbot/code-mode` remains responsible for tool declarations, source
 validation, protocol routing, and telemetry. `@torkbot/sandbox` remains
@@ -25,21 +23,34 @@ Sandbox process pipe's standard readable and writable Web Streams pair.
 ## Install
 
 ```sh
-npm install @torkbot/code-mode @torkbot/code-mode-sandbox @torkbot/sandbox
+npm install @torkbot/code-mode @torkbot/code-mode-sandbox @torkbot/sandbox \
+  @torkbot/sandbox-image-alpine-3.23-agent
 ```
 
 ## Usage
 
-Define and boot the machine with Sandbox, then adapt that machine for code mode:
+Define and boot the machine with Sandbox, then create its code-mode runtime:
 
 ```ts
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+
 import { createClient } from "@torkbot/code-mode";
-import { Node24Runtime } from "@torkbot/code-mode/node";
-import { createSandboxNodeRuntimeHost } from "@torkbot/code-mode-sandbox";
-import { defineSandbox } from "@torkbot/sandbox";
+import { createSandboxNodeRuntime } from "@torkbot/code-mode-sandbox";
+import { defineSandbox, fs, rootfs } from "@torkbot/sandbox";
+import {
+  image as alpine323Agent,
+} from "@torkbot/sandbox-image-alpine-3.23-agent";
+
+const workdir = process.cwd();
+const torkbotDirectory = join(workdir, ".torkbot");
+await mkdir(torkbotDirectory, { recursive: true });
 
 const definition = defineSandbox({
-  rootfs: machineRootfs,
+  rootfs: rootfs.persistent({
+    base: alpine323Agent,
+    path: join(torkbotDirectory, "rootfs.qcow2"),
+  }),
   resources: {
     cpus: 2,
     memoryMiB: 2048,
@@ -47,22 +58,35 @@ const definition = defineSandbox({
 });
 
 await using sandbox = await definition.boot({
+  mounts: {
+    "/workspace": fs.bind({
+      source: workdir,
+      access: "ro",
+      mask: {
+        paths: ["/.git", "/.torkbot", "/node_modules"],
+      },
+    }),
+  },
   cwd: "/workspace",
 });
 
-const runtime = new Node24Runtime(
-  createSandboxNodeRuntimeHost({
-    sandbox,
-    cwd: "/workspace",
-    nodePath: "/usr/bin/node",
-  }),
-);
+const runtime = createSandboxNodeRuntime({
+  sandbox,
+  cwd: "/workspace",
+  nodePath: "/usr/bin/node",
+});
 
 const client = createClient({
   toolbox,
   runtime,
 });
 ```
+
+This keeps durable guest rootfs changes in `.torkbot/rootfs.qcow2`. The
+`.torkbot` directory is masked from `/workspace`, so the guest cannot access
+its own VM state file through the workdir mount. The mount is read-only and
+also hides the host's Git metadata and `node_modules`; platform-specific host
+dependencies should not cross the VM boundary.
 
 The absolute guest working directory and Node.js path are required because they
 determine module resolution and the executable used for both validation and
