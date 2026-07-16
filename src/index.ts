@@ -1,8 +1,9 @@
-import type {
-  Node24RuntimeHost,
-  Node24RuntimeLaunchRequest,
+import {
+  Node24Runtime,
+  type Node24RuntimeLaunchRequest,
 } from "@torkbot/code-mode/node";
 import type {
+  Runtime,
   RuntimeFinished,
   RuntimeInstance,
 } from "@torkbot/code-mode/runtime";
@@ -15,29 +16,29 @@ import type {
 const maximumStderrLength = 64 * 1024;
 const terminationGracePeriodMilliseconds = 1_000;
 
-export interface SandboxNodeRuntimeHostOptions {
+export interface SandboxNodeRuntimeOptions {
   readonly sandbox: SandboxInstance;
   readonly nodePath: string;
   readonly cwd: string;
 }
 
 /**
- * Creates the Sandbox execution host required by Node24Runtime.
+ * Creates a Node.js 24 code-mode runtime backed by a caller-owned Sandbox.
  *
  * The caller must keep the Sandbox instance open while the runtime is in use
- * and remains responsible for closing it. The host owns only the guest
- * processes it launches through Node24Runtime.
+ * and remains responsible for closing it. The runtime owns only the guest
+ * processes it launches.
  */
-export function createSandboxNodeRuntimeHost(
-  options: SandboxNodeRuntimeHostOptions,
-): Node24RuntimeHost {
+export function createSandboxNodeRuntime(
+  options: SandboxNodeRuntimeOptions,
+): Runtime {
   requireAbsoluteGuestPath("cwd", options.cwd);
   requireAbsoluteGuestPath("nodePath", options.nodePath);
 
-  return {
+  return new Node24Runtime({
     readNodeVersion: (signal) => readSandboxNodeVersion(options, signal),
     launchNode: (req) => launchSandboxNode(options, req),
-  };
+  });
 }
 
 function requireAbsoluteGuestPath(name: string, value: string): void {
@@ -47,7 +48,7 @@ function requireAbsoluteGuestPath(name: string, value: string): void {
 }
 
 async function readSandboxNodeVersion(
-  options: SandboxNodeRuntimeHostOptions,
+  options: SandboxNodeRuntimeOptions,
   signal: AbortSignal,
 ): Promise<string> {
   signal.throwIfAborted();
@@ -68,7 +69,7 @@ async function readSandboxNodeVersion(
 }
 
 async function launchSandboxNode(
-  options: SandboxNodeRuntimeHostOptions,
+  options: SandboxNodeRuntimeOptions,
   req: Node24RuntimeLaunchRequest,
 ): Promise<RuntimeInstance> {
   req.signal.throwIfAborted();
