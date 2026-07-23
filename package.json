@@ -36,7 +36,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@torkbot/code-mode": "^0.2.0",
+    "@torkbot/code-mode": "^0.3.1",
     "@torkbot/sandbox": "^0.14.0"
   }
 }
